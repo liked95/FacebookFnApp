@@ -40,7 +40,8 @@ namespace FacebookFnApp.Functions
                 if (mediaUploadJob == null)
                 {
                     _logger.LogError("Failed to deserialize message body to MediaUploadJobDto");
-                    await messageActions.DeadLetterMessageAsync(message, "Invalid message format");
+                    var deadLetterReason = new Dictionary<string, object> { ["reason"] = "Invalid message format" };
+                    await messageActions.DeadLetterMessageAsync(message, deadLetterReason);
                     return;
                 }
 
@@ -56,13 +57,13 @@ namespace FacebookFnApp.Functions
 
                 // Process the media upload job
                 _logger.LogInformation("Starting to process media upload job {JobId} for user {UserId}", 
-                    mediaUploadJob.Id, mediaUploadJob.UserId);
+                    mediaUploadJob.JobId, mediaUploadJob.UserId);
 
                 var processedJob = await _mediaProcessingService.ProcessMediaUploadAsync(mediaUploadJob);
 
                 // Log the result
                 _logger.LogInformation("Media upload job {JobId} processed with status: {Status}", 
-                    processedJob.Id, processedJob.Status);
+                    processedJob.JobId, processedJob.ProcessingStatus);
 
                 // Complete the message
                 await messageActions.CompleteMessageAsync(message);
@@ -71,7 +72,8 @@ namespace FacebookFnApp.Functions
             catch (JsonException ex)
             {
                 _logger.LogError(ex, "Failed to deserialize message body for message {MessageId}", message.MessageId);
-                await messageActions.DeadLetterMessageAsync(message, "JSON deserialization failed");
+                var deadLetterReason = new Dictionary<string, object> { ["reason"] = "JSON deserialization failed" };
+                await messageActions.DeadLetterMessageAsync(message, deadLetterReason);
             }
             catch (Exception ex)
             {
@@ -82,7 +84,8 @@ namespace FacebookFnApp.Functions
                 {
                     _logger.LogWarning("Message {MessageId} has been retried {DeliveryCount} times, moving to dead letter queue", 
                         message.MessageId, message.DeliveryCount);
-                    await messageActions.DeadLetterMessageAsync(message, "Max retry attempts exceeded");
+                    var deadLetterReason = new Dictionary<string, object> { ["reason"] = "Max retry attempts exceeded" };
+                    await messageActions.DeadLetterMessageAsync(message, deadLetterReason);
                 }
                 else
                 {

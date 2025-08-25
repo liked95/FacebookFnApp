@@ -1,40 +1,36 @@
-using System.Text.Json.Serialization;
+using System;
+using System.Collections.Generic;
 
 namespace FacebookFnApp.Models
 {
     public class MediaUploadJobDto
     {
-        [JsonPropertyName("id")]
-        public string Id { get; set; } = string.Empty;
-
-        [JsonPropertyName("userId")]
-        public string UserId { get; set; } = string.Empty;
-
-        [JsonPropertyName("fileName")]
-        public string FileName { get; set; } = string.Empty;
-
-        [JsonPropertyName("fileType")]
-        public string FileType { get; set; } = string.Empty;
-
-        [JsonPropertyName("fileSize")]
-        public long FileSize { get; set; }
-
-        [JsonPropertyName("tempStoragePath")]
-        public string TempStoragePath { get; set; } = string.Empty;
-
-        [JsonPropertyName("finalStoragePath")]
-        public string FinalStoragePath { get; set; } = string.Empty;
-
-        [JsonPropertyName("mediaType")]
-        public string MediaType { get; set; } = string.Empty; // "image" or "video"
-
-        [JsonPropertyName("processingOptions")]
-        public Dictionary<string, object>? ProcessingOptions { get; set; }
-
-        [JsonPropertyName("createdAt")]
+        public Guid JobId { get; set; }
+        public Guid UserId { get; set; }
+        public string AttachmentId { get; set; } = string.Empty;
+        public MediaAttachmentType AttachmentType { get; set; }
+        public List<MediaFileInfoDto> MediaFiles { get; set; } = new();
         public DateTime CreatedAt { get; set; }
-
-        [JsonPropertyName("status")]
-        public string Status { get; set; } = "pending";
+        public int RetryCount { get; set; } = 0;
+        public string ProcessingStatus { get; set; } = "pending";
     }
-} 
+
+    public class MediaFileInfoDto
+    {
+        public Guid MediaFileId { get; set; }
+        public string TempFileName { get; set; } = string.Empty;
+        public string OriginalFileName { get; set; } = string.Empty;
+        public long FileSize { get; set; }
+        public string MimeType { get; set; } = string.Empty;
+        public string MediaType { get; set; } = string.Empty;
+        public int DisplayOrder { get; set; }
+        public string TempBlobUrl { get; set; } = string.Empty;
+    }
+
+    public enum MediaAttachmentType
+    {
+        Post,
+        ProfilePicture,
+        Message
+    }
+}

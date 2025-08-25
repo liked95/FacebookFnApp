@@ -13,30 +13,34 @@ namespace FacebookFnApp
 
             var testJob = new MediaUploadJobDto
             {
-                Id = Guid.NewGuid().ToString(),
-                UserId = "test-user-123",
-                FileName = "test-image.jpg",
-                FileType = "image/jpeg",
-                FileSize = 1024000,
-                TempStoragePath = "temp/uploads/test-image.jpg",
-                FinalStoragePath = "media/processed/test-image.jpg",
-                MediaType = "image",
-                ProcessingOptions = new Dictionary<string, object>
+                JobId = Guid.NewGuid(),
+                UserId = Guid.NewGuid(),
+                AttachmentId = "test-attachment-123",
+                AttachmentType = MediaAttachmentType.Post,
+                MediaFiles = new List<MediaFileInfoDto>
                 {
-                    ["resize"] = true,
-                    ["maxWidth"] = 1920,
-                    ["maxHeight"] = 1080,
-                    ["quality"] = 85
+                    new MediaFileInfoDto
+                    {
+                        MediaFileId = Guid.NewGuid(),
+                        TempFileName = "temp-test-image.jpg",
+                        OriginalFileName = "test-image.jpg",
+                        FileSize = 1024000,
+                        MimeType = "image/jpeg",
+                        MediaType = "image",
+                        DisplayOrder = 1,
+                        TempBlobUrl = "https://temp.blob.core.windows.net/uploads/test-image.jpg"
+                    }
                 },
                 CreatedAt = DateTime.UtcNow,
-                Status = "pending"
+                RetryCount = 0,
+                ProcessingStatus = "pending"
             };
 
             var messageBody = JsonSerializer.Serialize(testJob);
             var message = new ServiceBusMessage(messageBody)
             {
-                MessageId = testJob.Id,
-                CorrelationId = testJob.UserId,
+                MessageId = testJob.JobId.ToString(),
+                CorrelationId = testJob.UserId.ToString(),
                 ContentType = "application/json"
             };
 
@@ -48,9 +52,10 @@ namespace FacebookFnApp
             {
                 await sender.SendMessageAsync(message);
                 Console.WriteLine($"Test message sent successfully!");
-                Console.WriteLine($"Message ID: {testJob.Id}");
+                Console.WriteLine($"Job ID: {testJob.JobId}");
                 Console.WriteLine($"User ID: {testJob.UserId}");
-                Console.WriteLine($"File: {testJob.FileName}");
+                Console.WriteLine($"Attachment ID: {testJob.AttachmentId}");
+                Console.WriteLine($"File: {testJob.MediaFiles.FirstOrDefault()?.OriginalFileName}");
             }
             catch (Exception ex)
             {
