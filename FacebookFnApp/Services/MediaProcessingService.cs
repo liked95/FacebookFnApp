@@ -1,6 +1,16 @@
-using Azure.Storage.Blobs;
+﻿using Azure.Storage.Blobs;
+using FacebookFnApp.Data;
 using FacebookFnApp.Models;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Jpeg;
+using SixLabors.ImageSharp.Formats.Png;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
+using System.ComponentModel;
+using Xabe.FFmpeg;
 
 namespace FacebookFnApp.Services
 {
@@ -8,141 +18,185 @@ namespace FacebookFnApp.Services
     {
         private readonly ILogger<MediaProcessingService> _logger;
         private readonly BlobServiceClient _blobServiceClient;
+        private readonly SqlConnectionFactory _connectionFactory;
         private readonly string _containerName;
         private readonly string _tempContainerName;
 
         public MediaProcessingService(
             ILogger<MediaProcessingService> logger,
-            BlobServiceClient blobServiceClient
+            BlobServiceClient blobServiceClient,
+            SqlConnectionFactory connectionFactory
             )
         {
             _logger = logger;
             _blobServiceClient = blobServiceClient;
-            _containerName = "media-files";
+            _connectionFactory = connectionFactory;
+            _containerName = "fb-media-files";
             _tempContainerName = $"{_containerName}-temp";
 
         }
 
         public async Task<MediaUploadJobDto> ProcessMediaUploadAsync(MediaUploadJobDto job)
         {
-            _logger.LogInformation("Starting media processing for job {JobId}", job.JobId);
-            
             try
             {
-                // Step 1: Download from temp storage
-                var downloadSuccess = await DownloadFromTempStorageAsync(job);
-                if (!downloadSuccess)
-                {
-                    job.ProcessingStatus = "failed";
-                    _logger.LogError("Failed to download file from temp storage for job {JobId}", job.JobId);
-                    return job;
-                }
-
-                // Step 2: Process media (resize, compress, etc.)
-                var processSuccess = await ProcessMediaAsync(job);
-                if (!processSuccess)
-                {
-                    job.ProcessingStatus = "failed";
-                    _logger.LogError("Failed to process media for job {JobId}", job.JobId);
-                    return job;
-                }
-
-                // Step 3: Upload to final storage
-                var uploadSuccess = await UploadToFinalStorageAsync(job);
-                if (!uploadSuccess)
-                {
-                    job.ProcessingStatus = "failed";
-                    _logger.LogError("Failed to upload to final storage for job {JobId}", job.JobId);
-                    return job;
-                }
-
-                // Step 4: Update database
-                var dbUpdateSuccess = await UpdateDatabaseAsync(job);
-                if (!dbUpdateSuccess)
-                {
-                    job.ProcessingStatus = "failed";
-                    _logger.LogError("Failed to update database for job {JobId}", job.JobId);
-                    return job;
-                }
-
-                // Step 5: Send notification
-                var notificationSuccess = await SendNotificationAsync(job);
-                if (!notificationSuccess)
-                {
-                    _logger.LogWarning("Failed to send notification for job {JobId}", job.JobId);
-                    // Don't fail the entire job for notification failure
-                }
+                var localPaths = await DownloadFromTempStorageAsync(job);
+                var processedFiles = await ProcessMediaFilesAsync(localPaths, job);
+                var finalUris = await UploadToFinalStorageAsync(processedFiles, job);
+                await UpdateDatabaseAsync(job, finalUris);
+                await SendNotificationAsync(job);
 
                 job.ProcessingStatus = "completed";
-                _logger.LogInformation("Successfully completed media processing for job {JobId}", job.JobId);
-                return job;
             }
             catch (Exception ex)
             {
                 job.ProcessingStatus = "failed";
-                _logger.LogError(ex, "Unexpected error processing media for job {JobId}", job.JobId);
-                return job;
+                _logger.LogError(ex, $"Error processing media for job {job.JobId}");
             }
+
+            return job;
         }
 
-        public async Task<bool> DownloadFromTempStorageAsync(MediaUploadJobDto job)
+
+        public async Task<List<string>> DownloadFromTempStorageAsync(MediaUploadJobDto job)
         {
-            _logger.LogInformation("Downloading files from temp storage");
-            
-            // TODO: Implement actual download logic
-            // Example: Download from Azure Blob Storage, S3, etc.
-            await Task.Delay(1000); // Simulate download time
-            
-            _logger.LogInformation("Successfully downloaded file from temp storage for job {JobId}", job.JobId);
-            return true;
+            List<string> localFiles = new List<string>();
+            var container = _blobServiceClient.GetBlobContainerClient(_tempContainerName);
+
+            var tempFolder = Path.Combine(Path.GetTempPath(), "media-jobs", job.JobId.ToString());
+            Directory.CreateDirectory(tempFolder);
+
+            foreach (var file in job.MediaFiles)
+            {
+                var blobClient = container.GetBlobClient(file.TempFileName);
+                var localPath = Path.Combine(tempFolder, file.OriginalFileName);
+
+                await blobClient.DownloadToAsync(localPath);
+                localFiles.Add(localPath);
+
+                _logger.LogInformation($"Downloaded {file.TempFileName} to {localPath}");
+            }
+
+            return localFiles;
         }
 
-        public async Task<bool> ProcessMediaAsync(MediaUploadJobDto job)
+        public async Task<List<string>> ProcessMediaFilesAsync(List<string> localPaths, MediaUploadJobDto job)
         {
-            _logger.LogInformation("Processing media for job {JobId}", job.JobId);
-            
-            // TODO: Implement actual media processing logic
-            // Example: Image resizing, video compression, format conversion, etc.
-            await Task.Delay(2000); // Simulate processing time
-            
-            _logger.LogInformation("Successfully processed media for job {JobId}", job.JobId);
-            return true;
+            var processedFiles = new List<string>();
+
+            foreach (var file in job.MediaFiles)
+            {
+                var inputPath = localPaths.First(p => p.EndsWith(file.OriginalFileName));
+                var extension = Path.GetExtension(inputPath).ToLower();
+                var outputPath = Path.ChangeExtension(inputPath, $".processed{extension}");
+
+                if (file.MediaType == "image")
+                {
+                    using var image = await Image.LoadAsync(inputPath);
+
+                    // Resize only if larger than max width
+                    int maxWidth = 1080;
+                    if (image.Width > maxWidth)
+                    {
+                        double scale = (double)maxWidth / image.Width;
+                        int newHeight = (int)(image.Height * scale);
+
+                        image.Mutate(x => x.Resize(new ResizeOptions
+                        {
+                            Mode = ResizeMode.Max,
+                            Size = new Size(maxWidth, newHeight)
+                        }));
+                    }
+
+                    // Save as JPEG with quality (better compression)
+                    outputPath = Path.ChangeExtension(outputPath, ".jpg");
+                    await image.SaveAsJpegAsync(outputPath, new JpegEncoder { Quality = 75 });
+
+                    _logger.LogInformation($"Compressed image {file.OriginalFileName} → {outputPath}");
+                }
+                else if (file.MediaType == "video")
+                {
+                    // Compress video: H.264, CRF 28, scale max width 1280px (≈720p)
+                    outputPath = Path.ChangeExtension(outputPath, ".mp4");
+
+                    await FFmpeg.Conversions.New()
+                        .AddParameter($"-i \"{inputPath}\" -vcodec libx264 -crf 28 -preset veryfast -vf scale=1280:-2 \"{outputPath}\"")
+                        .Start();
+
+                    _logger.LogInformation($"Compressed video {file.OriginalFileName} → {outputPath}");
+                }
+
+                processedFiles.Add(outputPath); // return processed file paths
+            }
+
+            return processedFiles;
         }
 
-        public async Task<bool> UploadToFinalStorageAsync(MediaUploadJobDto job)
+
+        public async Task<List<Uri>> UploadToFinalStorageAsync(List<string> processedFiles, MediaUploadJobDto job)
         {
-            _logger.LogInformation("Uploading processed file to final storage: {FinalPath}", job.JobId);
-            
-            // TODO: Implement actual upload logic
-            // Example: Upload to Azure Blob Storage, S3, etc.
-            await Task.Delay(1500); // Simulate upload time
-            
-            _logger.LogInformation("Successfully uploaded file to final storage for job {JobId}", job.JobId);
-            return true;
+            var container = _blobServiceClient.GetBlobContainerClient(_containerName);
+            var uris = new List<Uri>();
+
+            for (int i = 0; i < job.MediaFiles.Count; i++)
+            {
+                var file = job.MediaFiles[i];
+                var processedPath = processedFiles[i];
+
+                // Store by user folder + unique file name
+                string finalFileName = $"{job.UserId}/{Guid.NewGuid()}-{file.OriginalFileName}";
+                var blobClient = container.GetBlobClient(finalFileName);
+
+                await blobClient.UploadAsync(processedPath, overwrite: true);
+                uris.Add(blobClient.Uri);
+
+
+                _logger.LogInformation($"Uploaded {file.OriginalFileName} → {blobClient.Uri}");
+            }
+
+            return uris;
         }
 
-        public async Task<bool> UpdateDatabaseAsync(MediaUploadJobDto job)
+        public async Task UpdateDatabaseAsync(MediaUploadJobDto job, List<Uri> finalUris)
         {
-            _logger.LogInformation("Updating database for job {JobId}", job.JobId);
-            
-            // TODO: Implement actual database update logic
-            // Example: Update SQL Database, Cosmos DB, etc.
-            await Task.Delay(500); // Simulate database update time
-            
-            _logger.LogInformation("Successfully updated database for job {JobId}", job.JobId);
-            return true;
+            using SqlConnection conn = _connectionFactory.CreateConnection();
+            await conn.OpenAsync();
+
+            for (int i = 0; i < job.MediaFiles.Count; i++)
+            {
+                var file = job.MediaFiles[i];
+                var finalUrl = finalUris[i].ToString();
+
+                string sql = @"
+                    UPDATE MediaFiles
+                    SET BlobUrl = @blobUrl,
+                        IsProcessed = 1,
+                        ProcessingStatus = @status,
+                        UpdatedAt = SYSUTCDATETIME()
+                    WHERE Id= @id";
+
+                using SqlCommand cmd = new SqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("@blobUrl", finalUrl);
+                cmd.Parameters.AddWithValue("@status", "completed");
+                cmd.Parameters.AddWithValue("@id", file.MediaFileId);
+                int rows = await cmd.ExecuteNonQueryAsync();
+
+                _logger.LogInformation(
+                $"[MediaProcessingService] Updated MediaFile {file.MediaFileId} → {finalUrl} (Rows affected: {rows})"
+            );
+            }
         }
 
         public async Task<bool> SendNotificationAsync(MediaUploadJobDto job)
         {
             _logger.LogInformation("Sending notification for job {JobId} to user {UserId}", job.JobId, job.UserId);
-            
+
             // TODO: Implement actual notification logic
             // Example: Firebase, ANH, email, etc.
             await Task.Delay(300); // Simulate notification sending time
-            
+
             _logger.LogInformation("Successfully sent notification for job {JobId}", job.JobId);
             return true;
         }
     }
-} 
+}

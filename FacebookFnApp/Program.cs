@@ -1,4 +1,5 @@
 using Azure.Storage.Blobs;
+using FacebookFnApp.Data;
 using FacebookFnApp.Services;
 using Microsoft.Azure.Functions.Worker.Builder;
 using Microsoft.Extensions.Configuration;
@@ -15,6 +16,11 @@ string blobConnectionString = builder.Configuration.GetValue<string>("AzureBlobS
 
 builder.Services.AddSingleton(new BlobServiceClient(blobConnectionString));
 
+// SQL connection string
+string sqlConnectionString = builder.Configuration.GetValue<string>("SqlConnection")
+    ?? throw new InvalidOperationException("SqlConnection not found!");
+
+builder.Services.AddSingleton(new SqlConnectionFactory(sqlConnectionString));
 
 
 // Register services

@@ -5,10 +5,10 @@ namespace FacebookFnApp.Services
     public interface IMediaProcessingService
     {
         Task<MediaUploadJobDto> ProcessMediaUploadAsync(MediaUploadJobDto job);
-        Task<bool> DownloadFromTempStorageAsync(MediaUploadJobDto job);
-        Task<bool> ProcessMediaAsync(MediaUploadJobDto job);
-        Task<bool> UploadToFinalStorageAsync(MediaUploadJobDto job);
-        Task<bool> UpdateDatabaseAsync(MediaUploadJobDto job);
+        Task<List<string>> DownloadFromTempStorageAsync(MediaUploadJobDto job);
+        Task<List<string>> ProcessMediaFilesAsync(List<string> localPaths, MediaUploadJobDto job);
+        Task<List<Uri>> UploadToFinalStorageAsync(List<string> processedFiles, MediaUploadJobDto job);
+        Task UpdateDatabaseAsync(MediaUploadJobDto job, List<Uri> uris);
         Task<bool> SendNotificationAsync(MediaUploadJobDto job);
     }
-} 
+}
