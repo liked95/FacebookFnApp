@@ -5,10 +5,17 @@ using Microsoft.Azure.Functions.Worker.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Xabe.FFmpeg;
 
 var builder = FunctionsApplication.CreateBuilder(args);
 
 builder.ConfigureFunctionsWebApplication();
+
+var ffmpegExePath = Path.Combine(
+    AppContext.BaseDirectory, 
+    "tools", "ffmpeg", "win-x64");
+
+FFmpeg.SetExecutablesPath(ffmpegExePath);
 
 // Azure blob storage string
 string blobConnectionString = builder.Configuration.GetValue<string>("AzureBlobStorage")
