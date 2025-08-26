@@ -33,14 +33,15 @@ namespace FacebookFnApp.Services
             _connectionFactory = connectionFactory;
             _containerName = "fb-media-files";
             _tempContainerName = $"{_containerName}-temp";
-
         }
 
         public async Task<MediaUploadJobDto> ProcessMediaUploadAsync(MediaUploadJobDto job)
         {
+            string tempFolder = null;
             try
             {
                 var localPaths = await DownloadFromTempStorageAsync(job);
+                tempFolder = Path.GetDirectoryName(localPaths.FirstOrDefault());
                 var processedFiles = await ProcessMediaFilesAsync(localPaths, job);
                 var finalUris = await UploadToFinalStorageAsync(processedFiles, job);
                 await UpdateDatabaseAsync(job, finalUris);
@@ -52,6 +53,25 @@ namespace FacebookFnApp.Services
             {
                 job.ProcessingStatus = "failed";
                 _logger.LogError(ex, $"Error processing media for job {job.JobId}");
+            }
+            finally
+            {
+                // Clean up local temp files
+                if (!string.IsNullOrEmpty(tempFolder) && Directory.Exists(tempFolder))
+                {
+                    try
+                    {
+                        Directory.Delete(tempFolder, recursive: true);
+                        _logger.LogInformation($"Cleaned up local temp folder: {tempFolder}");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, $"Failed to clean up local temp folder: {tempFolder}");
+                    }
+                }
+
+                // Clean up Azure temp blobs
+                await CleanupTempBlobsAsync(job);
             }
 
             return job;
@@ -116,14 +136,23 @@ namespace FacebookFnApp.Services
                 }
                 else if (file.MediaType == "video")
                 {
-                    // Compress video: H.264, CRF 28, scale max width 1280px (≈720p)
-                    outputPath = Path.ChangeExtension(outputPath, ".mp4");
+                    try
+                    {
+                        // Compress video: H.264, CRF 28, scale max width 1280px (≈720p)
+                        outputPath = Path.ChangeExtension(outputPath, ".mp4");
 
-                    await FFmpeg.Conversions.New()
-                        .AddParameter($"-i \"{inputPath}\" -vcodec libx264 -crf 28 -preset veryfast -vf scale=1280:-2 \"{outputPath}\"")
-                        .Start();
+                        await FFmpeg.Conversions.New()
+                            .AddParameter($"-i \"{inputPath}\" -vcodec libx264 -crf 28 -preset veryfast -vf scale=1280:-2 \"{outputPath}\"")
+                            .Start();
 
-                    _logger.LogInformation($"Compressed video {file.OriginalFileName} → {outputPath}");
+                        _logger.LogInformation($"Compressed video {file.OriginalFileName} → {outputPath}");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, $"FFmpeg processing failed for {file.OriginalFileName}. Using original file as fallback.");
+                        // Use original file as fallback
+                        outputPath = inputPath;
+                    }
                 }
 
                 processedFiles.Add(outputPath); // return processed file paths
@@ -197,6 +226,25 @@ namespace FacebookFnApp.Services
 
             _logger.LogInformation("Successfully sent notification for job {JobId}", job.JobId);
             return true;
+        }
+
+        private async Task CleanupTempBlobsAsync(MediaUploadJobDto job)
+        {
+            try
+            {
+                var container = _blobServiceClient.GetBlobContainerClient(_tempContainerName);
+                
+                foreach (var file in job.MediaFiles)
+                {
+                    var blobClient = container.GetBlobClient(file.TempFileName);
+                    await blobClient.DeleteIfExistsAsync();
+                    _logger.LogInformation($"Deleted temp blob: {file.TempFileName}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, $"Failed to clean up temp blobs for job {job.JobId}");
+            }
         }
     }
 }
