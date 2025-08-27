@@ -32,6 +32,7 @@ builder.Services.AddSingleton(new SqlConnectionFactory(sqlConnectionString));
 
 // Register services
 builder.Services.AddScoped<IMediaProcessingService, MediaProcessingService>();
+builder.Services.AddScoped<INotificationService, NotificationService>();
 
 // Application Insights isn't enabled by default. See https://aka.ms/AAt8mw4.
 // builder.Services

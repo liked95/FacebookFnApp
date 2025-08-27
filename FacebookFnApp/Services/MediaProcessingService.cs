@@ -19,18 +19,21 @@ namespace FacebookFnApp.Services
         private readonly ILogger<MediaProcessingService> _logger;
         private readonly BlobServiceClient _blobServiceClient;
         private readonly SqlConnectionFactory _connectionFactory;
+        private readonly INotificationService _notificationService;
         private readonly string _containerName;
         private readonly string _tempContainerName;
 
         public MediaProcessingService(
             ILogger<MediaProcessingService> logger,
             BlobServiceClient blobServiceClient,
-            SqlConnectionFactory connectionFactory
+            SqlConnectionFactory connectionFactory,
+            INotificationService notificationService
             )
         {
             _logger = logger;
             _blobServiceClient = blobServiceClient;
             _connectionFactory = connectionFactory;
+            _notificationService = notificationService;
             _containerName = "fb-media-files";
             _tempContainerName = $"{_containerName}-temp";
         }
@@ -45,7 +48,7 @@ namespace FacebookFnApp.Services
                 var processedFiles = await ProcessMediaFilesAsync(localPaths, job);
                 var finalUris = await UploadToFinalStorageAsync(processedFiles, job);
                 await UpdateDatabaseAsync(job, finalUris);
-                await SendNotificationAsync(job);
+                await _notificationService.SendNotificationAsync(job);
 
                 job.ProcessingStatus = "completed";
             }
@@ -216,17 +219,7 @@ namespace FacebookFnApp.Services
             }
         }
 
-        public async Task<bool> SendNotificationAsync(MediaUploadJobDto job)
-        {
-            _logger.LogInformation("Sending notification for job {JobId} to user {UserId}", job.JobId, job.UserId);
 
-            // TODO: Implement actual notification logic
-            // Example: Firebase, ANH, email, etc.
-            await Task.Delay(300); // Simulate notification sending time
-
-            _logger.LogInformation("Successfully sent notification for job {JobId}", job.JobId);
-            return true;
-        }
 
         private async Task CleanupTempBlobsAsync(MediaUploadJobDto job)
         {

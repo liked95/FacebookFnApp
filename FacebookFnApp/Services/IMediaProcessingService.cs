@@ -9,6 +9,5 @@ namespace FacebookFnApp.Services
         Task<List<string>> ProcessMediaFilesAsync(List<string> localPaths, MediaUploadJobDto job);
         Task<List<Uri>> UploadToFinalStorageAsync(List<string> processedFiles, MediaUploadJobDto job);
         Task UpdateDatabaseAsync(MediaUploadJobDto job, List<Uri> uris);
-        Task<bool> SendNotificationAsync(MediaUploadJobDto job);
     }
 }
