@@ -57,12 +57,15 @@ namespace FacebookFnApp.Services
                 // Create notification payload for FCM (Firebase Cloud Messaging)
                 var notificationPayload = new Dictionary<string, object>
                 {
-                    ["notification"] = new Dictionary<string, string>
+                    ["message"] = new Dictionary<string, object>
                     {
-                        ["title"] = title,
-                        ["body"] = message
-                    },
-                    ["data"] = customData ?? new Dictionary<string, string>()
+                        ["notification"] = new Dictionary<string, string>
+                        {
+                            ["title"] = title,
+                            ["body"] = message
+                        },
+                        ["data"] = customData ?? new Dictionary<string, string>()
+                    }
                 };
 
                 // Convert to JSON string
